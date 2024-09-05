@@ -3,8 +3,11 @@ package commands
 import (
 	"flag"
 	"fmt"
+	"os"
 
 	"github.com/luancgs/db-utils/databases"
+	"github.com/luancgs/db-utils/errors"
+	"github.com/luancgs/db-utils/views/runners"
 )
 
 func NewRestoreCommand() *RestoreCommand {
@@ -12,46 +15,67 @@ func NewRestoreCommand() *RestoreCommand {
 		flagSet: flag.NewFlagSet("restore", flag.ContinueOnError),
 	}
 
-	restoreCommand.flagSet.StringVar(&restoreCommand.databaseUrl, "url", "", "url of the database")
-	restoreCommand.flagSet.StringVar(&restoreCommand.restoreFile, "file", "", "file to restore the database")
+	restoreCommand.flagSet.BoolVar(&restoreCommand.help, "help", false, "Show help message")
+	restoreCommand.flagSet.BoolVar(&restoreCommand.help, "h", false, "Show help message")
+
+	restoreCommand.flagSet.StringVar(&restoreCommand.databaseUrl, "url", "", "Database URL")
+	restoreCommand.flagSet.StringVar(&restoreCommand.databaseUrl, "u", "", "Database URL")
+
+	restoreCommand.flagSet.StringVar(&restoreCommand.restoreFile, "file", "", "File to restore the database")
+	restoreCommand.flagSet.StringVar(&restoreCommand.restoreFile, "f", "", "File to restore the database")
 
 	return restoreCommand
 }
 
 type RestoreCommand struct {
 	flagSet     *flag.FlagSet
+	help        bool
 	databaseUrl string
 	restoreFile string
 }
 
-func (rc *RestoreCommand) Name() string {
-	return rc.flagSet.Name()
+func (pc *RestoreCommand) Name() string {
+	return pc.flagSet.Name()
 }
 
-func (rc *RestoreCommand) Init(args []string) error {
-	return rc.flagSet.Parse(args)
+func (pc *RestoreCommand) Init(args []string) error {
+	return pc.flagSet.Parse(args)
 }
 
-func (rc *RestoreCommand) Run() error {
-	if rc.databaseUrl == "" {
-		return fmt.Errorf("database url is required")
+func (pc *RestoreCommand) Run() {
+	if pc.help {
+		fmt.Println(pc.Help())
+		os.Exit(0)
 	}
 
-	db, err := databases.ParseUrl(rc.databaseUrl)
-	if err != nil {
-		return fmt.Errorf("failed parsing database url: %w", err)
+	if pc.databaseUrl == "" || pc.restoreFile == "" {
+		runners.ResultRunner("Database URL and restore file are required", 0)
+		return
 	}
 
-	ok, err := db.Restore(rc.restoreFile)
-	if err != nil {
-		return fmt.Errorf("failed restoring database: %w", err)
-	}
+	db, err := databases.ParseUrl(pc.databaseUrl)
+	errors.ErrorHandler("Error while parsing database URL", err)
+
+	ok, err := db.Restore(pc.restoreFile)
+	errors.ErrorHandler("Error while restoring from file", err)
 
 	if !ok {
-		return fmt.Errorf("failed restoring database")
+		runners.ResultRunner("Database restore failed!", 0)
+		return
 	}
 
-	fmt.Println("Database restored successfully.")
+	runners.ResultRunner("Database restored successfully.", 1)
+}
 
-	return nil
+func (pc RestoreCommand) Help() string {
+	var output string
+
+	output += fmt.Sprintln("Usage: db-utils dump [flags]")
+	output += fmt.Sprintln()
+	output += fmt.Sprintln("Flags:")
+	output += fmt.Sprintln("  -h, --help     Show help message")
+	output += fmt.Sprintln("  -u, --url      Database URL")
+	output += fmt.Sprintln("  -f, --file     File to restore the database")
+
+	return output
 }

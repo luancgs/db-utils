@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/luancgs/db-utils/databases"
+	"github.com/luancgs/db-utils/errors"
+	"github.com/luancgs/db-utils/views/runners"
 )
 
 func NewDumpCommand() *DumpCommand {
@@ -18,18 +20,23 @@ func NewDumpCommand() *DumpCommand {
 		homeDir = ""
 	}
 
-	dumpCommand.flagSet.StringVar(&dumpCommand.dumpDir, "dir", homeDir, "directory to save the dump file")
-	dumpCommand.flagSet.StringVar(&dumpCommand.databaseUrl, "url", "", "url of the database")
-	dumpCommand.flagSet.BoolVar(&dumpCommand.isRestorable, "restorable", false, "if the dump should be restorable")
+	dumpCommand.flagSet.BoolVar(&dumpCommand.help, "help", false, "Show help message")
+	dumpCommand.flagSet.BoolVar(&dumpCommand.help, "h", false, "Show help message")
+
+	dumpCommand.flagSet.StringVar(&dumpCommand.dumpDir, "dir", homeDir, "Directory to save the dump file")
+	dumpCommand.flagSet.StringVar(&dumpCommand.dumpDir, "d", homeDir, "Directory to save the dump file")
+
+	dumpCommand.flagSet.StringVar(&dumpCommand.databaseUrl, "url", "", "Database URL")
+	dumpCommand.flagSet.StringVar(&dumpCommand.databaseUrl, "u", "", "Database URL")
 
 	return dumpCommand
 }
 
 type DumpCommand struct {
-	flagSet      *flag.FlagSet
-	databaseUrl  string
-	dumpDir      string
-	isRestorable bool
+	flagSet     *flag.FlagSet
+	help        bool
+	databaseUrl string
+	dumpDir     string
 }
 
 func (dc *DumpCommand) Name() string {
@@ -40,22 +47,45 @@ func (dc *DumpCommand) Init(args []string) error {
 	return dc.flagSet.Parse(args)
 }
 
-func (dc *DumpCommand) Run() error {
+func (dc *DumpCommand) Run() {
+	if dc.help {
+		fmt.Println(dc.Help())
+		os.Exit(0)
+	}
+
 	if dc.databaseUrl == "" {
-		return fmt.Errorf("database url is required")
+		runners.ResultRunner("Database URL is required", 0)
+		return
 	}
 
 	db, err := databases.ParseUrl(dc.databaseUrl)
-	if err != nil {
-		return fmt.Errorf("failed parsing database url: %w", err)
-	}
+	errors.ErrorHandler("Error while parsing database URL", err)
 
-	sqlDump, err := db.Dump(false, dc.isRestorable, dc.dumpDir)
-	if err != nil {
-		return fmt.Errorf("failed dumping database: %w", err)
-	}
+	var sqlDump string
+	doneChan := make(chan bool)
+	var dumpError error
 
-	fmt.Println("Database dumped successfully. File saved at: ", sqlDump)
+	go func() {
+		sqlDump, dumpError = db.Dump(false, dc.dumpDir)
+		doneChan <- true
+	}()
 
-	return nil
+	runners.LoadingRunner("Dumping database...", nil, doneChan)
+
+	errors.ErrorHandler("Error while dumping database", dumpError)
+
+	runners.ResultRunner(fmt.Sprint("Database dumped successfully. File saved at: ", sqlDump), 1)
+}
+
+func (dc DumpCommand) Help() string {
+	var output string
+
+	output += fmt.Sprintln("Usage: db-utils dump [flags]")
+	output += fmt.Sprintln()
+	output += fmt.Sprintln("Flags:")
+	output += fmt.Sprintln("  -h, --help         Show help message")
+	output += fmt.Sprintln("  -u, --url          Database URL")
+	output += fmt.Sprintln("  -d, --dir          Directory to save the dump file")
+
+	return output
 }

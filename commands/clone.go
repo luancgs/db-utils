@@ -3,8 +3,11 @@ package commands
 import (
 	"flag"
 	"fmt"
+	"os"
 
 	"github.com/luancgs/db-utils/databases"
+	"github.com/luancgs/db-utils/errors"
+	"github.com/luancgs/db-utils/views/runners"
 )
 
 func NewCloneCommand() *CloneCommand {
@@ -12,16 +15,23 @@ func NewCloneCommand() *CloneCommand {
 		flagSet: flag.NewFlagSet("clone", flag.ContinueOnError),
 	}
 
-	cloneCommand.flagSet.StringVar(&cloneCommand.databaseOriginUrl, "origin-url", "", "url of the origin database")
-	cloneCommand.flagSet.StringVar(&cloneCommand.databaseTargetUrl, "target-url", "", "url of the target database")
+	cloneCommand.flagSet.BoolVar(&cloneCommand.help, "help", false, "Show help message")
+	cloneCommand.flagSet.BoolVar(&cloneCommand.help, "h", false, "Show help message")
+
+	cloneCommand.flagSet.StringVar(&cloneCommand.sourceUrl, "input", "", "Source database URL")
+	cloneCommand.flagSet.StringVar(&cloneCommand.sourceUrl, "i", "", "Source database URL")
+
+	cloneCommand.flagSet.StringVar(&cloneCommand.targetUrl, "output", "", "Target database URL")
+	cloneCommand.flagSet.StringVar(&cloneCommand.targetUrl, "o", "", "Target database URL")
 
 	return cloneCommand
 }
 
 type CloneCommand struct {
-	flagSet           *flag.FlagSet
-	databaseOriginUrl string
-	databaseTargetUrl string
+	flagSet   *flag.FlagSet
+	help      bool
+	sourceUrl string
+	targetUrl string
 }
 
 func (qc *CloneCommand) Name() string {
@@ -32,43 +42,47 @@ func (qc *CloneCommand) Init(args []string) error {
 	return qc.flagSet.Parse(args)
 }
 
-func (qc *CloneCommand) Run() error {
+func (qc *CloneCommand) Run() {
 
-	if qc.databaseOriginUrl == "" || qc.databaseTargetUrl == "" {
-		fmt.Print("Enter the origin database url: ")
-		var originUrlString string
-		fmt.Scanln(&originUrlString)
-
-		fmt.Print("Enter the target database url: ")
-		var targetUrlString string
-		fmt.Scanln(&targetUrlString)
-
-		originDb, err := databases.ParseUrl(originUrlString)
-		if err != nil {
-			return fmt.Errorf("failed parsing origin database url: %w", err)
-		}
-
-		targetDb, err := databases.ParseUrl(targetUrlString)
-		if err != nil {
-			return fmt.Errorf("failed parsing target database url: %w", err)
-		}
-
-		sqlDump, err := originDb.Dump(true, false, "")
-		if err != nil {
-			return fmt.Errorf("failed dumping origin database: %w", err)
-		}
-
-		ok, err := targetDb.Populate(sqlDump)
-		if err != nil {
-			return fmt.Errorf("failed populating target database: %w", err)
-		}
-
-		if !ok {
-			fmt.Println("Database population failed!")
-		}
+	if qc.help {
+		fmt.Println(qc.Help())
+		os.Exit(0)
 	}
 
-	fmt.Println("Database cloned successfully.")
+	if qc.sourceUrl == "" || qc.targetUrl == "" {
+		runners.ResultRunner("Source and Target URLs are required", 0)
+		return
+	}
 
-	return nil
+	originDb, err := databases.ParseUrl(qc.sourceUrl)
+	errors.ErrorHandler("Error while parsing source database URL", err)
+
+	targetDb, err := databases.ParseUrl(qc.targetUrl)
+	errors.ErrorHandler("Error while parsing target database URL", err)
+
+	sqlDump, err := originDb.Dump(true, "")
+	errors.ErrorHandler("Error while dumping origin database", err)
+
+	ok, err := targetDb.Restore(sqlDump)
+	errors.ErrorHandler("Error while restoring target database", err)
+
+	if !ok {
+		runners.ResultRunner("Database restore failed!", 0)
+		return
+	}
+
+	runners.ResultRunner("Database cloned successfully.", 1)
+}
+
+func (qc CloneCommand) Help() string {
+	var output string
+
+	output += fmt.Sprintln("Usage: db-utils clone [flags]")
+	output += fmt.Sprintln()
+	output += fmt.Sprintln("Flags:")
+	output += fmt.Sprintln("  -h, --help      Show help message")
+	output += fmt.Sprintln("  -i, --input     Source database URL")
+	output += fmt.Sprintln("  -o, --output    Target database URL")
+
+	return output
 }
