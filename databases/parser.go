@@ -6,8 +6,7 @@ import (
 )
 
 type Database interface {
-	Dump(bool, bool, string) (string, error)
-	Populate(string) (bool, error)
+	Dump(bool, string) (string, error)
 	Restore(string) (bool, error)
 	RunQuery(string) (string, error)
 }

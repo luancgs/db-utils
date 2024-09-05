@@ -10,9 +10,12 @@ import (
 )
 
 const (
-	dockerImage     = "postgres"
-	defaultPort     = 5432
-	defaultPassword = ""
+	POSTGRES_DEFAULT_DOCKER_IMAGE    = "postgres"
+	POSTGRES_DEFAULT_PORT            = 5432
+	POSTGRES_DEFAULT_PASSWORD        = ""
+	POSTGRES_DEFAULT_COMMAND_DUMP    = "pg_dump"
+	POSTGRES_DEFAULT_COMMAND_RESTORE = "psql"
+	POSTGRES_DEFAULT_COMMAND_QUERY   = "psql"
 )
 
 type PostgresDatabase struct {
@@ -25,19 +28,11 @@ type PostgresDatabase struct {
 	Query    string
 }
 
-func (db PostgresDatabase) Dump(isTemporary, isRestorable bool, dir string) (string, error) {
-	fmt.Printf("Dumping database: %s\n", db.Database)
-
+func (db PostgresDatabase) Dump(isTemporary bool, dir string) (string, error) {
 	port := fmt.Sprintf("%d", db.Port)
 	passwordInput := fmt.Sprintf("PGPASSWORD=%s", db.Password)
 
-	var cmd *exec.Cmd
-
-	if isRestorable {
-		cmd = exec.Command("docker", "run", "--rm", "--env", passwordInput, dockerImage, "pg_dump", "-U", db.Username, "-h", db.Host, "-p", port, "-d", db.Database, "--format=custom")
-	} else {
-		cmd = exec.Command("docker", "run", "--rm", "--env", passwordInput, dockerImage, "pg_dump", "-U", db.Username, "-h", db.Host, "-p", port, "-d", db.Database, "--clean", "--encoding=UTF8")
-	}
+	cmd := exec.Command("docker", "run", "--rm", "--network", "host", "--env", passwordInput, POSTGRES_DEFAULT_DOCKER_IMAGE, POSTGRES_DEFAULT_COMMAND_DUMP, "-U", db.Username, "-h", db.Host, "-p", port, "-d", db.Database, "--clean", "--encoding=UTF8")
 
 	stdout, err := cmd.Output()
 	if err != nil {
@@ -56,8 +51,8 @@ func (db PostgresDatabase) Dump(isTemporary, isRestorable bool, dir string) (str
 			}
 		}
 
-		currentYear, currentMonth, currentDay := time.Now().Local().Date()
-		dumpFile = fmt.Sprintf("dump_%s_%d%d%d.sql", db.Database, currentYear, currentMonth, currentDay)
+		date := time.Now().Local().Format("2006-01-02_15-04-05")
+		dumpFile = fmt.Sprintf("dump_%s_%s_*.sql", db.Database, date)
 	}
 
 	file, err := os.CreateTemp(dir, dumpFile)
@@ -73,7 +68,7 @@ func (db PostgresDatabase) Dump(isTemporary, isRestorable bool, dir string) (str
 	return file.Name(), nil
 }
 
-func (db PostgresDatabase) Populate(fileName string) (bool, error) {
+func (db PostgresDatabase) Restore(fileName string) (bool, error) {
 	fmt.Printf("Populating database: %s\n", db.Database)
 
 	containerFile := "/input.sql"
@@ -81,7 +76,7 @@ func (db PostgresDatabase) Populate(fileName string) (bool, error) {
 	port := fmt.Sprintf("%d", db.Port)
 	passwordInput := fmt.Sprintf("PGPASSWORD=%s", db.Password)
 
-	cmd := exec.Command("docker", "run", "--rm", "--network", "host", "--volume", volume, "--env", passwordInput, dockerImage, "psql", "-U", db.Username, "-h", db.Host, "-p", port, "-d", db.Database, "-f", containerFile)
+	cmd := exec.Command("docker", "run", "--rm", "--network", "host", "--volume", volume, "--env", passwordInput, POSTGRES_DEFAULT_DOCKER_IMAGE, POSTGRES_DEFAULT_COMMAND_RESTORE, "-U", db.Username, "-h", db.Host, "-p", port, "-d", db.Database, "-f", containerFile)
 
 	_, err := cmd.Output()
 	if err != nil {
@@ -95,7 +90,7 @@ func (db PostgresDatabase) RunQuery(query string) (string, error) {
 	port := fmt.Sprintf("%d", db.Port)
 	passwordInput := fmt.Sprintf("PGPASSWORD=%s", db.Password)
 
-	cmd := exec.Command("docker", "run", "--rm", "--env", passwordInput, dockerImage, "psql", "-U", db.Username, "-h", db.Host, "-p", port, "-d", db.Database, "-c", query)
+	cmd := exec.Command("docker", "run", "--rm", "--network", "host", "--env", passwordInput, POSTGRES_DEFAULT_DOCKER_IMAGE, POSTGRES_DEFAULT_COMMAND_QUERY, "-U", db.Username, "-h", db.Host, "-p", port, "-d", db.Database, "-c", query)
 
 	stdout, err := cmd.Output()
 	if err != nil {
@@ -105,34 +100,16 @@ func (db PostgresDatabase) RunQuery(query string) (string, error) {
 	return string(stdout), nil
 }
 
-func (db PostgresDatabase) Restore(fileName string) (bool, error) {
-	fmt.Printf("Restoring database: %s\n", db.Database)
-
-	containerFile := "/input.sql"
-	volume := fmt.Sprintf("%s:%s", fileName, containerFile)
-	port := fmt.Sprintf("%d", db.Port)
-	passwordInput := fmt.Sprintf("PGPASSWORD=%s", db.Password)
-
-	cmd := exec.Command("docker", "run", "--rm", "--network", "host", "--volume", volume, "--env", passwordInput, dockerImage, "psql", "-U", db.Username, "-h", db.Host, "-p", port, "-d", db.Database, "-f", containerFile)
-
-	_, err := cmd.Output()
-	if err != nil {
-		return false, fmt.Errorf("failed running docker to restore database: %w", err)
-	}
-
-	return true, nil
-}
-
 func parsePostgres(parsedUrl *url.URL) (Database, error) {
 
 	db := PostgresDatabase{
 		Protocol: parsedUrl.Scheme,
 		Host:     parsedUrl.Hostname(),
-		Port:     defaultPort,
+		Port:     POSTGRES_DEFAULT_PORT,
 		Database: parsedUrl.Path[1:],
 		Query:    parsedUrl.RawQuery,
 		Username: parsedUrl.User.Username(),
-		Password: defaultPassword,
+		Password: POSTGRES_DEFAULT_PASSWORD,
 	}
 
 	if parsedUrl.Port() != "" {
